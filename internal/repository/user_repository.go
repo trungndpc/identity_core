@@ -20,7 +20,7 @@ type UserRepository interface {
 	Create(ctx context.Context, user *domain.User) error
 	Update(ctx context.Context, user *domain.User) error
 	FindByID(ctx context.Context, tenantID, userID int64) (*domain.User, error)
-	FindByUsername(ctx context.Context, username string) (*domain.User, error)
+	FindByUsername(ctx context.Context, tenantID int64, username string) (*domain.User, error)
 	FindByIDWithRelations(ctx context.Context, tenantID, userID int64) (*domain.User, error)
 	List(ctx context.Context, filter UserFilter) ([]domain.User, int64, error)
 	Delete(ctx context.Context, tenantID, userID int64) error
@@ -56,9 +56,9 @@ func (r *userRepository) FindByID(ctx context.Context, tenantID, userID int64) (
 	return &user, nil
 }
 
-func (r *userRepository) FindByUsername(ctx context.Context, username string) (*domain.User, error) {
+func (r *userRepository) FindByUsername(ctx context.Context, tenantID int64, username string) (*domain.User, error) {
 	var user domain.User
-	err := r.db.WithContext(ctx).Where("username = ?", username).First(&user).Error
+	err := r.scoped(ctx, tenantID).Where("username = ?", username).First(&user).Error
 	if err != nil {
 		return nil, err
 	}

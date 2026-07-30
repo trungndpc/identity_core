@@ -92,18 +92,18 @@ func (s *adminAuthService) Login(ctx context.Context, username, password string)
 }
 
 func (s *adminAuthService) GetProfile(ctx context.Context, username string) (*dto.AdminProfileResponse, error) {
-	user, err := s.userRepo.FindByUsername(ctx, username)
+	tenant, err := s.tenantRepo.FindByCode(ctx, s.cfg.AdminTenantCode)
+	if err != nil {
+		return nil, mapDBError(err, apperror.ErrUnauthorized)
+	}
+
+	user, err := s.userRepo.FindByUsername(ctx, tenant.ID, username)
 	if err != nil {
 		return nil, mapDBError(err, apperror.ErrUnauthorized)
 	}
 
 	if user.Status != domain.UserStatusActive {
 		return nil, apperror.ErrUnauthorized
-	}
-
-	tenant, err := s.tenantRepo.FindByID(ctx, user.TenantID)
-	if err != nil {
-		return nil, mapDBError(err, apperror.ErrUnauthorized)
 	}
 
 	if tenant.Status != domain.TenantStatusActive {
