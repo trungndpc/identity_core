@@ -48,11 +48,14 @@ func Setup(deps Dependencies) *gin.Engine {
 	adminProtected.Use(middleware.AdminAuth(deps.Config.AdminAPIKey, deps.AdminAuthService))
 	adminProtected.GET("/auth/me", adminAuthHandler.Me)
 
+	superAdminOnly := adminProtected.Group("")
+	superAdminOnly.Use(middleware.RequireAdminRole(deps.AdminAuthService, "super_admin"))
+
 	adminTenantHandler := admin.NewTenantHandler(deps.TenantService)
-	adminProtected.POST("/tenants", adminTenantHandler.Create)
-	adminProtected.GET("/tenants", adminTenantHandler.List)
-	adminProtected.GET("/tenants/:id", adminTenantHandler.Get)
-	adminProtected.PUT("/tenants/:id", adminTenantHandler.Update)
+	superAdminOnly.POST("/tenants", adminTenantHandler.Create)
+	superAdminOnly.GET("/tenants", adminTenantHandler.List)
+	superAdminOnly.GET("/tenants/:id", adminTenantHandler.Get)
+	superAdminOnly.PUT("/tenants/:id", adminTenantHandler.Update)
 
 	adminTenantScoped := adminProtected.Group("")
 	adminTenantScoped.Use(middleware.TenantRequired(deps.TenantService))
@@ -66,15 +69,17 @@ func Setup(deps Dependencies) *gin.Engine {
 	adminTenantScoped.PUT("/users/:id/roles", adminUserHandler.AssignRoles)
 
 	adminRoleHandler := admin.NewRoleHandler(deps.RoleService)
-	adminTenantScoped.POST("/roles", adminRoleHandler.Create)
-	adminTenantScoped.GET("/roles", adminRoleHandler.List)
-	adminTenantScoped.GET("/roles/:id", adminRoleHandler.Get)
-	adminTenantScoped.PUT("/roles/:id", adminRoleHandler.Update)
-	adminTenantScoped.DELETE("/roles/:id", adminRoleHandler.Delete)
+	superAdminTenantScoped := superAdminOnly.Group("")
+	superAdminTenantScoped.Use(middleware.TenantRequired(deps.TenantService))
+	superAdminTenantScoped.POST("/roles", adminRoleHandler.Create)
+	superAdminTenantScoped.GET("/roles", adminRoleHandler.List)
+	superAdminTenantScoped.GET("/roles/:id", adminRoleHandler.Get)
+	superAdminTenantScoped.PUT("/roles/:id", adminRoleHandler.Update)
+	superAdminTenantScoped.DELETE("/roles/:id", adminRoleHandler.Delete)
 
 	adminPermissionHandler := admin.NewPermissionHandler(deps.PermissionService)
-	adminProtected.POST("/permissions", adminPermissionHandler.Create)
-	adminProtected.GET("/permissions", adminPermissionHandler.List)
+	superAdminOnly.POST("/permissions", adminPermissionHandler.Create)
+	superAdminOnly.GET("/permissions", adminPermissionHandler.List)
 
 	adminRelHandler := admin.NewRelationshipHandler(deps.RelationshipService)
 	adminTenantScoped.POST("/relationships", adminRelHandler.Create)

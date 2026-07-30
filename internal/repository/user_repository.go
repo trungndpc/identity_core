@@ -58,7 +58,11 @@ func (r *userRepository) FindByID(ctx context.Context, tenantID, userID int64) (
 
 func (r *userRepository) FindByUsername(ctx context.Context, tenantID int64, username string) (*domain.User, error) {
 	var user domain.User
-	err := r.scoped(ctx, tenantID).Where("username = ?", username).First(&user).Error
+	err := r.scoped(ctx, tenantID).
+		Preload("Roles").
+		Preload("Roles.Permissions").
+		Where("username = ?", username).
+		First(&user).Error
 	if err != nil {
 		return nil, err
 	}
