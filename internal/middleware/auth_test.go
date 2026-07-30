@@ -10,6 +10,7 @@ import (
 	"github.com/updev/galaxy/identity_core/internal/contextkeys"
 	"github.com/updev/galaxy/identity_core/internal/domain"
 	"github.com/updev/galaxy/identity_core/internal/dto"
+	"github.com/updev/galaxy/identity_core/internal/service"
 )
 
 type adminAuthServiceStub struct {
@@ -21,25 +22,29 @@ func (s adminAuthServiceStub) Login(context.Context, string, string) (*dto.Admin
 	return nil, nil
 }
 
-func (s adminAuthServiceStub) GetProfile(context.Context, string) (*dto.AdminProfileResponse, error) {
+func (s adminAuthServiceStub) GetProfile(context.Context, service.AdminPrincipal) (*dto.AdminProfileResponse, error) {
 	return s.profile, s.err
 }
 
-func (s adminAuthServiceStub) ValidateToken(string) (string, error) {
-	return "", nil
+func (s adminAuthServiceStub) ValidateToken(string) (service.AdminPrincipal, error) {
+	return service.AdminPrincipal{}, nil
 }
 
-func TestRequireAdminRoleAllowsMatchingRole(t *testing.T) {
+func TestRequireAdminPermissionAllowsMatchingPermission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	engine.Use(func(c *gin.Context) {
 		c.Set(string(contextkeys.AdminUsername), "admin")
+		c.Set(string(contextkeys.AdminTenantCode), "root")
 	})
-	engine.Use(RequireAdminRole(adminAuthServiceStub{
+	engine.Use(RequireAdminPermission(adminAuthServiceStub{
 		profile: &dto.AdminProfileResponse{
-			User: domain.User{Roles: []domain.Role{{Code: "super_admin"}}},
+			User: domain.User{Roles: []domain.Role{{
+				Code:        "super_admin",
+				Permissions: []domain.Permission{{Code: "tenants.manage"}},
+			}}},
 		},
-	}, "super_admin"))
+	}, "tenants.manage"))
 	engine.GET("/", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 
 	responseRecorder := httptest.NewRecorder()
@@ -50,17 +55,18 @@ func TestRequireAdminRoleAllowsMatchingRole(t *testing.T) {
 	}
 }
 
-func TestRequireAdminRoleRejectsMissingRole(t *testing.T) {
+func TestRequireAdminPermissionRejectsMissingPermission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	engine.Use(func(c *gin.Context) {
 		c.Set(string(contextkeys.AdminUsername), "editor")
+		c.Set(string(contextkeys.AdminTenantCode), "sgs")
 	})
-	engine.Use(RequireAdminRole(adminAuthServiceStub{
+	engine.Use(RequireAdminPermission(adminAuthServiceStub{
 		profile: &dto.AdminProfileResponse{
 			User: domain.User{Roles: []domain.Role{{Code: "editor"}}},
 		},
-	}, "super_admin"))
+	}, "tenants.manage"))
 	engine.GET("/", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 
 	responseRecorder := httptest.NewRecorder()
@@ -71,13 +77,13 @@ func TestRequireAdminRoleRejectsMissingRole(t *testing.T) {
 	}
 }
 
-func TestRequireAdminRoleAllowsSystemAPIKeyAuthentication(t *testing.T) {
+func TestRequireAdminPermissionAllowsSystemAPIKeyAuthentication(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	engine.Use(func(c *gin.Context) {
 		c.Set(string(contextkeys.AdminAPIKeyAuth), true)
 	})
-	engine.Use(RequireAdminRole(adminAuthServiceStub{}, "super_admin"))
+	engine.Use(RequireAdminPermission(adminAuthServiceStub{}, "tenants.manage"))
 	engine.GET("/", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 
 	responseRecorder := httptest.NewRecorder()
@@ -85,5 +91,31 @@ func TestRequireAdminRoleAllowsSystemAPIKeyAuthentication(t *testing.T) {
 
 	if responseRecorder.Code != http.StatusNoContent {
 		t.Fatalf("expected %d, got %d", http.StatusNoContent, responseRecorder.Code)
+	}
+}
+
+func TestRequireAdminPermissionRejectsDifferentTenant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		c.Set(string(contextkeys.AdminUsername), "sgs")
+		c.Set(string(contextkeys.AdminTenantCode), "sgs")
+	})
+	engine.Use(RequireAdminPermission(adminAuthServiceStub{
+		profile: &dto.AdminProfileResponse{
+			User: domain.User{Roles: []domain.Role{{
+				Permissions: []domain.Permission{{Code: "users.manage"}},
+			}}},
+		},
+	}, "users.manage"))
+	engine.GET("/", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set(HeaderTenantCode, "knauf")
+	responseRecorder := httptest.NewRecorder()
+	engine.ServeHTTP(responseRecorder, request)
+
+	if responseRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected %d, got %d", http.StatusForbidden, responseRecorder.Code)
 	}
 }

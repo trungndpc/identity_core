@@ -46,7 +46,16 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		return
 	}
 
-	result, err := h.adminAuthService.GetProfile(c.Request.Context(), username)
+	tenantValue, ok := c.Get(string(contextkeys.AdminTenantCode))
+	tenantCode, validTenant := tenantValue.(string)
+	if !ok || !validTenant || tenantCode == "" {
+		response.HandleError(c, apperror.ErrUnauthorized)
+		return
+	}
+
+	result, err := h.adminAuthService.GetProfile(c.Request.Context(), service.AdminPrincipal{
+		Username: username, TenantCode: tenantCode,
+	})
 	if err != nil {
 		response.HandleError(c, err)
 		return

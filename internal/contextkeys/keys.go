@@ -8,6 +8,7 @@ const (
 	TenantCode      ContextKey = "tenant_code"
 	UserID          ContextKey = "user_id"
 	AdminUsername   ContextKey = "admin_username"
+	AdminTenantCode ContextKey = "admin_tenant_code"
 	AdminAPIKeyAuth ContextKey = "admin_api_key_auth"
 )
 

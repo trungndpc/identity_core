@@ -33,9 +33,10 @@ func AdminAuth(expectedKey string, adminAuthService service.AdminAuthService) gi
 		auth := c.GetHeader("Authorization")
 		if strings.HasPrefix(auth, "Bearer ") {
 			token := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
-			username, err := adminAuthService.ValidateToken(token)
+			principal, err := adminAuthService.ValidateToken(token)
 			if err == nil {
-				c.Set(string(contextkeys.AdminUsername), username)
+				c.Set(string(contextkeys.AdminUsername), principal.Username)
+				c.Set(string(contextkeys.AdminTenantCode), principal.TenantCode)
 				c.Next()
 				return
 			}
@@ -46,10 +47,10 @@ func AdminAuth(expectedKey string, adminAuthService service.AdminAuthService) gi
 	}
 }
 
-func RequireAdminRole(adminAuthService service.AdminAuthService, allowedRoles ...string) gin.HandlerFunc {
-	roleSet := make(map[string]struct{}, len(allowedRoles))
-	for _, role := range allowedRoles {
-		roleSet[role] = struct{}{}
+func RequireAdminPermission(adminAuthService service.AdminAuthService, allowedPermissions ...string) gin.HandlerFunc {
+	permissionSet := make(map[string]struct{}, len(allowedPermissions))
+	for _, permission := range allowedPermissions {
+		permissionSet[permission] = struct{}{}
 	}
 
 	return func(c *gin.Context) {
@@ -60,23 +61,35 @@ func RequireAdminRole(adminAuthService service.AdminAuthService, allowedRoles ..
 
 		usernameValue, ok := c.Get(string(contextkeys.AdminUsername))
 		username, validUsername := usernameValue.(string)
-		if !ok || !validUsername || username == "" {
+		tenantValue, hasTenant := c.Get(string(contextkeys.AdminTenantCode))
+		tenantCode, validTenant := tenantValue.(string)
+		if !ok || !validUsername || username == "" || !hasTenant || !validTenant || tenantCode == "" {
 			response.HandleError(c, apperror.ErrUnauthorized)
 			c.Abort()
 			return
 		}
 
-		profile, err := adminAuthService.GetProfile(c.Request.Context(), username)
+		profile, err := adminAuthService.GetProfile(c.Request.Context(), service.AdminPrincipal{
+			Username: username, TenantCode: tenantCode,
+		})
 		if err != nil {
 			response.HandleError(c, err)
 			c.Abort()
 			return
 		}
 
+		if requestedTenant := strings.TrimSpace(c.GetHeader(HeaderTenantCode)); requestedTenant != "" && requestedTenant != tenantCode {
+			response.HandleError(c, apperror.ErrForbidden)
+			c.Abort()
+			return
+		}
+
 		for _, role := range profile.User.Roles {
-			if _, allowed := roleSet[role.Code]; allowed {
-				c.Next()
-				return
+			for _, permission := range role.Permissions {
+				if _, allowed := permissionSet[permission.Code]; allowed {
+					c.Next()
+					return
+				}
 			}
 		}
 

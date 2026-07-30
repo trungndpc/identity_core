@@ -21,10 +21,28 @@ type UserRepository interface {
 	Update(ctx context.Context, user *domain.User) error
 	FindByID(ctx context.Context, tenantID, userID int64) (*domain.User, error)
 	FindByUsername(ctx context.Context, tenantID int64, username string) (*domain.User, error)
+	FindByUsernameGlobally(ctx context.Context, username string) (*domain.User, error)
 	FindByIDWithRelations(ctx context.Context, tenantID, userID int64) (*domain.User, error)
 	List(ctx context.Context, filter UserFilter) ([]domain.User, int64, error)
 	Delete(ctx context.Context, tenantID, userID int64) error
 	ExistsInTenant(ctx context.Context, tenantID, userID int64) (bool, error)
+}
+
+func (r *userRepository) FindByUsernameGlobally(ctx context.Context, username string) (*domain.User, error) {
+	var users []domain.User
+	err := r.db.WithContext(ctx).
+		Preload("Roles").
+		Preload("Roles.Permissions").
+		Where("username = ?", username).
+		Limit(2).
+		Find(&users).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(users) != 1 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &users[0], nil
 }
 
 type userRepository struct {

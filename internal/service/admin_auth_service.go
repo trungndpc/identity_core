@@ -15,8 +15,13 @@ import (
 
 type AdminAuthService interface {
 	Login(ctx context.Context, username, password string) (*dto.AdminLoginResponse, error)
-	GetProfile(ctx context.Context, username string) (*dto.AdminProfileResponse, error)
-	ValidateToken(tokenString string) (string, error)
+	GetProfile(ctx context.Context, principal AdminPrincipal) (*dto.AdminProfileResponse, error)
+	ValidateToken(tokenString string) (AdminPrincipal, error)
+}
+
+type AdminPrincipal struct {
+	Username   string
+	TenantCode string
 }
 
 type adminAuthService struct {
@@ -27,7 +32,8 @@ type adminAuthService struct {
 }
 
 type adminJWTClaims struct {
-	Username string `json:"username"`
+	Username   string `json:"username"`
+	TenantCode string `json:"tenant_code"`
 	jwt.RegisteredClaims
 }
 
@@ -50,17 +56,17 @@ func (s *adminAuthService) Login(ctx context.Context, username, password string)
 		return nil, apperror.ErrInternal
 	}
 
-	tenantCode := s.cfg.AdminTenantCode
-	if tenantCode == "" {
-		return nil, apperror.ErrInternal
-	}
-
-	tenant, err := s.tenantRepo.FindByCode(ctx, tenantCode)
+	adminUser, err := s.userRepo.FindByUsernameGlobally(ctx, username)
 	if err != nil {
 		return nil, apperror.ErrUnauthorized
 	}
 
-	user, err := s.identityService.Verify(ctx, tenant.ID, dto.VerifyIdentityRequest{
+	tenant, err := s.tenantRepo.FindByID(ctx, adminUser.TenantID)
+	if err != nil || tenant.Status != domain.TenantStatusActive {
+		return nil, apperror.ErrUnauthorized
+	}
+
+	user, err := s.identityService.Verify(ctx, adminUser.TenantID, dto.VerifyIdentityRequest{
 		Identity: username,
 		Password: password,
 	})
@@ -70,7 +76,8 @@ func (s *adminAuthService) Login(ctx context.Context, username, password string)
 
 	expiresAt := time.Now().Add(time.Duration(s.cfg.JWTExpiryHours) * time.Hour)
 	claims := adminJWTClaims{
-		Username: user.Username,
+		Username:   user.Username,
+		TenantCode: tenant.Code,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   "admin",
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
@@ -91,13 +98,13 @@ func (s *adminAuthService) Login(ctx context.Context, username, password string)
 	}, nil
 }
 
-func (s *adminAuthService) GetProfile(ctx context.Context, username string) (*dto.AdminProfileResponse, error) {
-	tenant, err := s.tenantRepo.FindByCode(ctx, s.cfg.AdminTenantCode)
+func (s *adminAuthService) GetProfile(ctx context.Context, principal AdminPrincipal) (*dto.AdminProfileResponse, error) {
+	tenant, err := s.tenantRepo.FindByCode(ctx, principal.TenantCode)
 	if err != nil {
 		return nil, mapDBError(err, apperror.ErrUnauthorized)
 	}
 
-	user, err := s.userRepo.FindByUsername(ctx, tenant.ID, username)
+	user, err := s.userRepo.FindByUsername(ctx, tenant.ID, principal.Username)
 	if err != nil {
 		return nil, mapDBError(err, apperror.ErrUnauthorized)
 	}
@@ -126,9 +133,9 @@ func sanitizeUserForResponse(user *domain.User) *domain.User {
 	return &responseUser
 }
 
-func (s *adminAuthService) ValidateToken(tokenString string) (string, error) {
+func (s *adminAuthService) ValidateToken(tokenString string) (AdminPrincipal, error) {
 	if s.cfg.JWTSecret == "" {
-		return "", apperror.ErrUnauthorized
+		return AdminPrincipal{}, apperror.ErrUnauthorized
 	}
 
 	claims := &adminJWTClaims{}
@@ -138,9 +145,9 @@ func (s *adminAuthService) ValidateToken(tokenString string) (string, error) {
 		}
 		return []byte(s.cfg.JWTSecret), nil
 	})
-	if err != nil || !token.Valid || claims.Username == "" {
-		return "", apperror.ErrUnauthorized
+	if err != nil || !token.Valid || claims.Username == "" || claims.TenantCode == "" {
+		return AdminPrincipal{}, apperror.ErrUnauthorized
 	}
 
-	return claims.Username, nil
+	return AdminPrincipal{Username: claims.Username, TenantCode: claims.TenantCode}, nil
 }
