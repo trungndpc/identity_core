@@ -1,0 +1,56 @@
+name: Production
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-identity
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test ./...
+      - name: Build Linux binary
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o identity_core ./cmd/server
+      - run: sha256sum identity_core > identity_core.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: identity_core-${{ github.sha }}
+          path: |
+            identity_core
+            identity_core.sha256
+          if-no-files-found: error
+
+      - name: Install SSH credentials
+        if: vars.DEPLOY_ENABLED == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+
+      - name: Deploy production
+        if: vars.DEPLOY_ENABLED == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          scp -i ~/.ssh/deploy_key identity_core \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/opt/sgs/incoming/identity_core-${GITHUB_SHA}"
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo /usr/local/sbin/sgs-deploy identity_core ${GITHUB_SHA}"
