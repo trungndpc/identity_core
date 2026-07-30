@@ -651,6 +651,11 @@ DELETE /api/v1/admin/roles/:id
 
 ### 4.4 Permissions
 
+Tracking permissions seeded by `scripts/migrations/002_seed_tracking_permissions.sql`:
+
+- `tracking.view`: view campaigns, links, QR and analytics.
+- `tracking.manage`: create, update and delete campaigns and links.
+
 > Global (không theo tenant). Không cần `X-Tenant-Code`.
 
 #### Tạo permission
