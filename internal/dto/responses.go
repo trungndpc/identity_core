@@ -19,9 +19,18 @@ type AdminProfileResponse struct {
 }
 
 type ZaloAuthResponse struct {
-	UserID   int64       `json:"user_id"`
-	User     domain.User `json:"user"`
-	IsMember bool        `json:"is_member"`
+	AccessToken string      `json:"access_token"`
+	TokenType   string      `json:"token_type"`
+	ExpiresIn   int64       `json:"expires_in"`
+	UserID      int64       `json:"user_id"`
+	User        domain.User `json:"user"`
+	IsMember    bool        `json:"is_member"`
+}
+
+type UserTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int64  `json:"expires_in"`
 }
 
 type PaginationMeta struct {

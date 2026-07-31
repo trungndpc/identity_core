@@ -92,8 +92,8 @@ Mọi response đều theo cấu trúc:
 | `X-Tenant-Code` | Có* | User, Admin (scoped), Internal | Mã tenant, ví dụ `galaxy` |
 | `X-Admin-API-Key` | Có | Admin API | API key quản trị |
 | `X-Internal-API-Key` | Có | Internal API | API key service-to-service |
-| `X-User-ID` | Có | User API | ID người dùng đang đăng nhập (số nguyên) |
-| `Authorization` | Thay thế | User API | `Bearer <user_id>` — thay cho `X-User-ID` |
+| `X-User-ID` | Legacy | User API | Chỉ khi `ALLOW_LEGACY_USER_ID_HEADER=true` |
+| `Authorization` | Có | User API (sau login) / Admin | `Bearer <user-jwt>` hoặc admin JWT |
 
 > \* Admin API **không** cần `X-Tenant-Code` khi quản lý tenants (`/admin/tenants`). Các endpoint còn lại trong Admin **cần** header này.
 
@@ -119,13 +119,13 @@ Trường `metadata` là JSON object tùy ý, dùng lưu dữ liệu mở rộng
 
 > **Dành cho:** App người dùng cuối (web, mobile, Zalo Mini App).
 >
-> **Auth:** Sau khi đăng nhập, lưu `user_id` và gửi qua `X-User-ID` hoặc `Authorization: Bearer <user_id>`.
+> **Auth:** Sau khi `POST /auth/zalo`, lưu `access_token` (Galaxy JWT) và gửi `Authorization: Bearer <access_token>`. Hết hạn thì login lại bằng Zalo `getAccessToken` (không dùng refresh token).
 
-**Headers bắt buộc mọi request (trừ auth/zalo):**
+**Headers bắt buộc mọi request đã đăng nhập:**
 
 ```
 X-Tenant-Code: sgs
-X-User-ID: 42
+Authorization: Bearer <user-jwt>
 ```
 
 ### 3.0 Đăng nhập / upsert Zalo
@@ -134,7 +134,7 @@ X-User-ID: 42
 POST /api/v1/user/auth/zalo
 ```
 
-Headers: `X-Tenant-Code` (không cần `X-User-ID`).
+Headers: `X-Tenant-Code` (không cần Bearer).
 
 Body (production):
 ```json
@@ -151,7 +151,17 @@ Body (production):
 
 Body (dev, `ZALO_AUTH_DEV_MODE=true`): `{ "zalo_id", "name?", "avatar_url?", "phone?" }`.
 
-Response: `{ user_id, user, is_member }`.
+Response:
+```json
+{
+  "access_token": "<galaxy-jwt>",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "user_id": 42,
+  "user": { "...": "..." },
+  "is_member": false
+}
+```
 
 ### 3.0a Đổi phone token → SĐT
 
@@ -169,7 +179,7 @@ Cần env `ZALO_APP_SECRET_KEY`.
 POST /api/v1/user/members/register
 ```
 
-Headers: `X-Tenant-Code` + `X-User-ID`.  
+Headers: `X-Tenant-Code` + `Authorization: Bearer <user-jwt>`.
 Body: `full_name`, `phone`, `email`, `avatar_url`, optional `city`, `ward`.  
 Gán role `member` (tạo nếu chưa có), gọi ZNS stub log.
 
@@ -944,12 +954,12 @@ interface PaginatedResponse<T> {
 ### 8.2 User App (Mobile / Web)
 
 ```
-1. User chọn tenant (hoặc tenant cố định theo app)
-2. Đăng nhập → gọi BFF → BFF gọi POST /internal/auth/verify
-3. BFF trả về user_id cho frontend
-4. Frontend lưu user_id, gửi kèm mọi request:
+1. App dùng tenant cố định hoặc chọn tenant trước khi đăng nhập
+2. Gọi POST /api/v1/user/auth/zalo bằng Zalo access token
+3. Backend trả Galaxy access_token (JWT)
+4. Frontend lưu access_token, gửi kèm mọi request:
    - X-Tenant-Code: <tenant_code>
-   - X-User-ID: <user_id>
+   - Authorization: Bearer <access_token>
 5. GET /user/me để hiển thị profile
 6. PUT /user/me để cập nhật profile
 ```
@@ -992,7 +1002,7 @@ curl -X POST http://localhost:8080/api/v1/admin/users \
 ```bash
 curl http://localhost:8080/api/v1/user/me \
   -H "X-Tenant-Code: galaxy" \
-  -H "X-User-ID: 1"
+  -H "Authorization: Bearer <user-jwt>"
 ```
 
 ### Internal — verify login (qua BFF)

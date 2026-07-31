@@ -27,9 +27,12 @@ type Config struct {
 	AdminTenantCode    string
 	JWTSecret          string
 	JWTExpiryHours     int
+	UserJWTSecret      string
+	UserJWTExpiryHours int
+	AllowLegacyUserID  bool
 	CORSAllowedOrigins []string
 
-	ZaloAuthDevMode bool
+	ZaloAuthDevMode  bool
 	ZaloAppSecretKey string
 }
 
@@ -52,6 +55,20 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid JWT_EXPIRY_HOURS: %w", err)
 	}
+	userJWTExpiryHours, err := strconv.Atoi(getEnv("USER_JWT_EXPIRY_HOURS", "1"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid USER_JWT_EXPIRY_HOURS: %w", err)
+	}
+
+	jwtSecret := getEnv("JWT_SECRET", "change-me-jwt-secret")
+	userJWTSecret := getEnv("USER_JWT_SECRET", "")
+	if userJWTSecret == "" {
+		userJWTSecret = jwtSecret
+	}
+	legacyDefault := "true"
+	if appEnv == "production" {
+		legacyDefault = "false"
+	}
 
 	cfg := &Config{
 		AppEnv:             appEnv,
@@ -67,8 +84,11 @@ func Load() (*Config, error) {
 		AdminUsername:      getEnv("ADMIN_USERNAME", "admin"),
 		AdminPassword:      getEnv("ADMIN_PASSWORD", "admin123"),
 		AdminTenantCode:    getEnv("ADMIN_TENANT_CODE", "support"),
-		JWTSecret:          getEnv("JWT_SECRET", "change-me-jwt-secret"),
+		JWTSecret:          jwtSecret,
 		JWTExpiryHours:     jwtExpiryHours,
+		UserJWTSecret:      userJWTSecret,
+		UserJWTExpiryHours: userJWTExpiryHours,
+		AllowLegacyUserID:  getEnv("ALLOW_LEGACY_USER_ID_HEADER", legacyDefault) == "true",
 		CORSAllowedOrigins: parseCORSAllowedOrigins(getEnv("CORS_ALLOWED_ORIGINS", ""), appEnv),
 		ZaloAuthDevMode:    getEnv("ZALO_AUTH_DEV_MODE", "true") == "true",
 		ZaloAppSecretKey:   getEnv("ZALO_APP_SECRET_KEY", ""),

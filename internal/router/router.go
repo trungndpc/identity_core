@@ -21,6 +21,7 @@ type Dependencies struct {
 	RoleService         service.RoleService
 	PermissionService   service.PermissionService
 	ZaloAuthService     service.ZaloAuthService
+	UserTokenService    service.UserTokenService
 }
 
 func Setup(deps Dependencies) *gin.Engine {
@@ -121,7 +122,7 @@ func Setup(deps Dependencies) *gin.Engine {
 	userGroup.POST("/auth/zalo/phone", authHandler.ResolveZaloPhone)
 
 	userAuthed := userGroup.Group("")
-	userAuthed.Use(middleware.UserAuth())
+	userAuthed.Use(middleware.UserAuth(deps.UserTokenService, deps.Config.AllowLegacyUserID))
 
 	userHandler := userapi.NewHandler(
 		deps.UserService,

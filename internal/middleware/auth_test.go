@@ -119,3 +119,93 @@ func TestRequireAdminPermissionRejectsDifferentTenant(t *testing.T) {
 		t.Fatalf("expected %d, got %d", http.StatusForbidden, responseRecorder.Code)
 	}
 }
+
+type userTokenServiceStub struct {
+	principal service.UserPrincipal
+	err       error
+}
+
+func (s userTokenServiceStub) IssueAccessToken(int64, int64, string) (*dto.UserTokenResponse, error) {
+	return nil, nil
+}
+func (s userTokenServiceStub) ValidateAccessToken(string) (service.UserPrincipal, error) {
+	return s.principal, s.err
+}
+
+func TestUserAuthAcceptsJWT(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(UserAuth(userTokenServiceStub{
+		principal: service.UserPrincipal{UserID: 42, TenantID: 1, TenantCode: "sgs"},
+	}, false))
+	engine.GET("/", func(c *gin.Context) {
+		id, _ := c.Get(string(contextkeys.UserID))
+		if id.(int64) != 42 {
+			t.Fatalf("unexpected user id: %v", id)
+		}
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer aaa.bbb.ccc")
+	req.Header.Set(HeaderTenantCode, "sgs")
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected %d, got %d", http.StatusNoContent, rec.Code)
+	}
+}
+
+func TestUserAuthRejectsTenantMismatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(UserAuth(userTokenServiceStub{
+		principal: service.UserPrincipal{UserID: 42, TenantID: 1, TenantCode: "sgs"},
+	}, false))
+	engine.GET("/", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer aaa.bbb.ccc")
+	req.Header.Set(HeaderTenantCode, "other")
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected %d, got %d", http.StatusForbidden, rec.Code)
+	}
+}
+
+func TestUserAuthRejectsLegacyWhenDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(UserAuth(userTokenServiceStub{}, false))
+	engine.GET("/", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(HeaderUserID, "42")
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected %d, got %d", http.StatusUnauthorized, rec.Code)
+	}
+}
+
+func TestUserAuthAllowsLegacyWhenEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(UserAuth(userTokenServiceStub{}, true))
+	engine.GET("/", func(c *gin.Context) {
+		id, _ := c.Get(string(contextkeys.UserID))
+		if id.(int64) != 42 {
+			t.Fatalf("unexpected user id: %v", id)
+		}
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(HeaderUserID, "42")
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected %d, got %d", http.StatusNoContent, rec.Code)
+	}
+}

@@ -34,12 +34,14 @@ func main() {
 	permissionRepo := repository.NewPermissionRepository(db)
 
 	znsNotifier := service.NewStubZNSNotifier()
+	userTokenService := service.NewUserTokenService(cfg)
 	zaloAuthService := service.NewZaloAuthService(
 		userRepo,
 		identityRepo,
 		roleRepo,
 		service.NewHTTPZaloClient(cfg.ZaloAppSecretKey),
 		znsNotifier,
+		userTokenService,
 		cfg.ZaloAuthDevMode,
 	)
 
@@ -53,6 +55,7 @@ func main() {
 		RoleService:         service.NewRoleService(roleRepo, permissionRepo),
 		PermissionService:   service.NewPermissionService(permissionRepo),
 		ZaloAuthService:     zaloAuthService,
+		UserTokenService:    userTokenService,
 	}
 
 	r := router.Setup(deps)

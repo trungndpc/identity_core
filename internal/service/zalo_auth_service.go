@@ -26,6 +26,7 @@ type zaloAuthService struct {
 	roleRepo     repository.RoleRepository
 	zaloClient   ZaloClient
 	zns          ZNSNotifier
+	tokenService UserTokenService
 	devMode      bool
 }
 
@@ -35,6 +36,7 @@ func NewZaloAuthService(
 	roleRepo repository.RoleRepository,
 	zaloClient ZaloClient,
 	zns ZNSNotifier,
+	tokenService UserTokenService,
 	devMode bool,
 ) ZaloAuthService {
 	return &zaloAuthService{
@@ -43,6 +45,7 @@ func NewZaloAuthService(
 		roleRepo:     roleRepo,
 		zaloClient:   zaloClient,
 		zns:          zns,
+		tokenService: tokenService,
 		devMode:      devMode,
 	}
 }
@@ -120,11 +123,18 @@ func (s *zaloAuthService) Authenticate(ctx context.Context, tenantID int64, tena
 		}
 	}
 
-	_ = tenantCode
+	tokens, err := s.tokenService.IssueAccessToken(user.ID, tenantID, tenantCode)
+	if err != nil {
+		return nil, err
+	}
+
 	return &dto.ZaloAuthResponse{
-		UserID:   user.ID,
-		User:     *user,
-		IsMember: hasMemberRole(user.Roles),
+		AccessToken: tokens.AccessToken,
+		TokenType:   tokens.TokenType,
+		ExpiresIn:   tokens.ExpiresIn,
+		UserID:      user.ID,
+		User:        *user,
+		IsMember:    hasMemberRole(user.Roles),
 	}, nil
 }
 

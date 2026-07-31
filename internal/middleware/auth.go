@@ -120,30 +120,53 @@ func apiKeyAuth(header, expectedKey string) gin.HandlerFunc {
 	}
 }
 
-func UserAuth() gin.HandlerFunc {
+func UserAuth(tokenService service.UserTokenService, allowLegacyUserID bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userIDStr := c.GetHeader(HeaderUserID)
-		if userIDStr == "" {
-			auth := c.GetHeader("Authorization")
-			if strings.HasPrefix(auth, "Bearer ") {
-				userIDStr = strings.TrimPrefix(auth, "Bearer ")
+		auth := c.GetHeader("Authorization")
+		if strings.HasPrefix(auth, "Bearer ") {
+			token := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+			// Prefer JWT when Bearer looks like a JWT (contains dots). Raw numeric IDs
+			// are only accepted when legacy mode is enabled.
+			if strings.Count(token, ".") >= 2 {
+				principal, err := tokenService.ValidateAccessToken(token)
+				if err != nil {
+					response.HandleError(c, apperror.ErrUnauthorized)
+					c.Abort()
+					return
+				}
+				if requestedTenant := strings.TrimSpace(c.GetHeader(HeaderTenantCode)); requestedTenant != "" && requestedTenant != principal.TenantCode {
+					response.HandleError(c, apperror.ErrForbidden)
+					c.Abort()
+					return
+				}
+				c.Set(string(contextkeys.UserID), principal.UserID)
+				c.Set(string(contextkeys.TenantCode), principal.TenantCode)
+				c.Next()
+				return
+			}
+			if allowLegacyUserID {
+				userID, err := strconv.ParseInt(token, 10, 64)
+				if err == nil && userID > 0 {
+					c.Set(string(contextkeys.UserID), userID)
+					c.Next()
+					return
+				}
 			}
 		}
 
-		if userIDStr == "" {
-			response.HandleError(c, apperror.ErrUnauthorized)
-			c.Abort()
-			return
+		if allowLegacyUserID {
+			userIDStr := c.GetHeader(HeaderUserID)
+			if userIDStr != "" {
+				userID, err := strconv.ParseInt(userIDStr, 10, 64)
+				if err == nil && userID > 0 {
+					c.Set(string(contextkeys.UserID), userID)
+					c.Next()
+					return
+				}
+			}
 		}
 
-		userID, err := strconv.ParseInt(userIDStr, 10, 64)
-		if err != nil || userID <= 0 {
-			response.HandleError(c, apperror.ErrUnauthorized)
-			c.Abort()
-			return
-		}
-
-		c.Set(string(contextkeys.UserID), userID)
-		c.Next()
+		response.HandleError(c, apperror.ErrUnauthorized)
+		c.Abort()
 	}
 }
