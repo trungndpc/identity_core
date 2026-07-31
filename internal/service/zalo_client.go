@@ -37,17 +37,20 @@ func NewHTTPZaloClient(secretKey string) ZaloClient {
 }
 
 type zaloGraphResponse struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
 	Picture struct {
 		Data struct {
 			URL string `json:"url"`
 		} `json:"data"`
 	} `json:"picture"`
-	Error *struct {
-		Message string `json:"message"`
-		Code    int    `json:"code"`
-	} `json:"error"`
+	Error   json.RawMessage `json:"error"`
+	Message string          `json:"message"`
+}
+
+type zaloGraphError struct {
+	Message string `json:"message"`
+	Code    int    `json:"code"`
 }
 
 type zaloPhoneInfoResponse struct {
@@ -76,13 +79,40 @@ func (c *httpZaloClient) GetProfile(ctx context.Context, accessToken string) (*Z
 		return nil, apperror.Wrap(err, apperror.ErrInternal.Code, "failed to read zalo response", apperror.ErrInternal.HTTPStatus)
 	}
 
+	return parseZaloGraphProfile(body)
+}
+
+func parseZaloGraphProfile(body []byte) (*ZaloProfile, error) {
 	var parsed zaloGraphResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return nil, apperror.Wrap(err, apperror.ErrInternal.Code, "invalid zalo response", apperror.ErrInternal.HTTPStatus)
 	}
-	if parsed.Error != nil {
-		return nil, apperror.New("ZALO_AUTH_FAILED", fmt.Sprintf("zalo error: %s", parsed.Error.Message), apperror.ErrUnauthorized.HTTPStatus)
+
+	if len(parsed.Error) > 0 && string(parsed.Error) != "null" {
+		var code int
+		if err := json.Unmarshal(parsed.Error, &code); err == nil {
+			if code != 0 {
+				message := strings.TrimSpace(parsed.Message)
+				if message == "" {
+					message = "zalo authentication failed"
+				}
+				return nil, apperror.New("ZALO_AUTH_FAILED", fmt.Sprintf("zalo error: %s", message), apperror.ErrUnauthorized.HTTPStatus)
+			}
+		} else {
+			var graphError zaloGraphError
+			if err := json.Unmarshal(parsed.Error, &graphError); err != nil {
+				return nil, apperror.Wrap(err, apperror.ErrInternal.Code, "invalid zalo response", apperror.ErrInternal.HTTPStatus)
+			}
+			if graphError.Code != 0 || strings.TrimSpace(graphError.Message) != "" {
+				message := strings.TrimSpace(graphError.Message)
+				if message == "" {
+					message = "zalo authentication failed"
+				}
+				return nil, apperror.New("ZALO_AUTH_FAILED", fmt.Sprintf("zalo error: %s", message), apperror.ErrUnauthorized.HTTPStatus)
+			}
+		}
 	}
+
 	if parsed.ID == "" {
 		return nil, apperror.New("ZALO_AUTH_FAILED", "zalo profile missing id", apperror.ErrUnauthorized.HTTPStatus)
 	}
